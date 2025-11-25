@@ -18,7 +18,7 @@ import {
 } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "***REMOVED***",
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: "people-cdb62.firebaseapp.com",
   projectId: "people-cdb62",
   storageBucket: "people-cdb62.firebasestorage.app",
