@@ -98,7 +98,7 @@ const handleSave = async () => {
 
   const displayPerson = isEditMode ? editedPerson : person;
   // NOTE: Assuming 'Mom' is the current user for editing purposes
-  const isOwnProfile = displayPerson?.name === 'Mom'; 
+  const isOwnProfile = true; 
   
   const timezoneOptions = [
     { value: 'America/New_York', label: '🗽 Eastern (NY)' },
