@@ -1,5 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { User, Settings, Plus, Upload, Clock, Cloud, Edit, Save, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Settings, Plus, Upload, Clock, Cloud, Edit, Save, X } from 'lucide-react';
+
+import { 
+  db, 
+  auth, 
+  signInAnonymously, 
+  signInWithCustomToken,
+  onAuthStateChanged,
+  doc,
+  setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  collection,
+  onSnapshot
+} from "./firebase";
+
 
 // Default chibi animations (represented as pixel art style emoji combos for now)
 const defaultAnimations = {
@@ -9,7 +25,11 @@ const defaultAnimations = {
   unknown: ['❓', '🤔']
 };
 
-// MOVE THIS OUTSIDE - Extract as standalone component
+const getDefaultEmoji = (animation) => {
+  return (defaultAnimations[animation] || defaultAnimations.unknown)[0];
+};
+
+// --- ProfileView Component (Extracted) ---
 const ProfileView = ({ 
   selectedPerson, 
   setView, 
@@ -18,26 +38,45 @@ const ProfileView = ({
   setSelectedPerson,
   renderChibi,
   getTimeForTimezone,
-  getWeather 
+  getWeather,
+  db // New prop
 }) => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editedPerson, setEditedPerson] = useState(null);
   
+  // 1. ADD REF for the hidden file input
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    // Initialize editedPerson when selectedPerson changes
+    if (selectedPerson) {
+      setEditedPerson(selectedPerson);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPerson]); 
+  
   const person = selectedPerson;
 
   const handleEditClick = () => {
-    setEditedPerson({...person});
+    setEditedPerson(person ? {...person} : null); 
     setIsEditMode(true);
   };
 
-  const handleSave = () => {
-    setPeople(people.map(p => 
-      p.id === editedPerson.id ? editedPerson : p
-    ));
+  // --- UPDATED: Save to Firestore ---
+const handleSave = async () => {
+  if (!editedPerson || !db) return;
+  try {
+    const docRef = doc(db, 'people', String(editedPerson.id));
+    await setDoc(docRef, editedPerson, { merge: true });
+    // Update local state
+    setPeople(prev => prev.map(p => p.id === editedPerson.id ? editedPerson : p));
     setSelectedPerson(editedPerson);
     setIsEditMode(false);
-    setEditedPerson(null);
-  };
+  } catch (error) {
+    console.error("Error updating document: ", error);
+  }
+};
+
 
   const handleCancel = () => {
     setEditedPerson(null);
@@ -47,8 +86,32 @@ const ProfileView = ({
   const handleFieldChange = (field, value) => {
     setEditedPerson(prev => ({...prev, [field]: value}));
   };
+  
+  const handleAnimationUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      handleFieldChange('customStatus', `[ANIMATION] Ready to use ${file.name}`);
+      handleFieldChange('animation', 'walk');
+      event.target.value = null; 
+    }
+  };
 
   const displayPerson = isEditMode ? editedPerson : person;
+  // NOTE: Assuming 'Mom' is the current user for editing purposes
+  const isOwnProfile = displayPerson?.name === 'Mom'; 
+  
+  const timezoneOptions = [
+    { value: 'America/New_York', label: '🗽 Eastern (NY)' },
+    { value: 'Asia/Kolkata', label: '🇮🇳 India (Kolkata)' },
+    { value: 'America/Chicago', label: '🌆 Central (Chicago)' },
+    { value: 'America/Denver', label: '⛰️ Mountain (Denver)' },
+    { value: 'America/Los_Angeles', label: '🌴 Pacific (LA)' },
+    { value: 'Europe/London', label: '🇬🇧 London' },
+    { value: 'Europe/Paris', label: '🇫🇷 Paris' },
+    { value: 'Asia/Tokyo', label: '🇯🇵 Tokyo' },
+    { value: 'Asia/Shanghai', label: '🇨🇳 Shanghai' },
+    { value: 'Australia/Sydney', label: '🇦🇺 Sydney' },
+  ];
 
   return (
     <div className="w-full h-full bg-gradient-to-b from-purple-200 to-pink-200 flex flex-col items-center justify-center p-4">
@@ -58,21 +121,21 @@ const ProfileView = ({
           setIsEditMode(false);
           setEditedPerson(null);
         }}
-        className="absolute top-4 left-4 bg-white px-4 py-2 rounded-full shadow-md hover:bg-gray-100"
+        className="absolute top-4 left-4 bg-white px-4 py-2 rounded-full shadow-md hover:bg-gray-100 z-10"
       >
         ← Back
       </button>
 
       <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full relative">
         {/* Edit button */}
-        {!isEditMode ? (
+        {isOwnProfile && !isEditMode ? (
           <button
             onClick={handleEditClick}
             className="absolute top-4 right-4 p-2 bg-purple-100 hover:bg-purple-200 rounded-full transition-colors"
           >
             <Edit size={20} className="text-purple-600" />
           </button>
-        ) : (
+        ) : isOwnProfile && isEditMode && (
           <div className="absolute top-4 right-4 flex gap-2">
             <button
               onClick={handleSave}
@@ -180,20 +243,23 @@ const ProfileView = ({
                 onChange={(e) => handleFieldChange('timezone', e.target.value)}
                 className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
               >
-                <option value="America/New_York">🗽 Eastern (NY)</option>
-                <option value="Asia/Kolkata">🇮🇳 India (Kolkata)</option>
-                <option value="America/Chicago">🌆 Central (Chicago)</option>
-                <option value="America/Denver">⛰️ Mountain (Denver)</option>
-                <option value="America/Los_Angeles">🌴 Pacific (LA)</option>
-                <option value="Europe/London">🇬🇧 London</option>
-                <option value="Europe/Paris">🇫🇷 Paris</option>
-                <option value="Asia/Tokyo">🇯🇵 Tokyo</option>
-                <option value="Asia/Shanghai">🇨🇳 Shanghai</option>
-                <option value="Australia/Sydney">🇦🇺 Sydney</option>
+                {timezoneOptions.map(tz => (
+                    <option key={tz.value} value={tz.value}>{tz.label}</option>
+                ))}
               </select>
             </div>
 
-            <button className="w-full bg-purple-500 text-white py-2 rounded-lg hover:bg-purple-600 flex items-center justify-center gap-2">
+            <input
+                type="file"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                // NOTE: No handler needed here, as we only simulate upload
+                accept=".png, .gif" 
+            />
+            <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full bg-purple-500 text-white py-2 rounded-lg hover:bg-purple-600 flex items-center justify-center gap-2"
+            >
               <Upload size={16} />
               Upload Custom Animation
             </button>
@@ -204,28 +270,50 @@ const ProfileView = ({
   );
 };
 
-// MOVE SettingsView OUTSIDE too
-const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, defaultAnimations }) => {
-  const handleAddPerson = () => {
+// --- SettingsView Component (Extracted) ---
+const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, db }) => {
+  
+  // Add a new person
+  const handleAddPerson = async () => {
+  if (!db) return;
+  try {
     const newPerson = {
-      id: Date.now(),
-      name: 'New Friend',
+      name: `New Friend ${people.length + 1}`,
       nickname: '',
       timezone: 'America/New_York',
       currentActivity: 'unknown',
       customStatus: '',
       animation: 'unknown',
       customAnimations: {},
-      position: { x: Math.random() * 60 + 20, y: Math.random() * 60 + 20 }
+      position: { x: Math.random() * 60 + 20, y: Math.random() * 60 + 20 },
     };
-    setPeople([...people, newPerson]);
-  };
 
-  const handleDeletePerson = (personId) => {
-    if (window.confirm('Are you sure you want to remove this person?')) {
-      setPeople(people.filter(p => p.id !== personId));
+    const docRef = await addDoc(collection(db, 'people'), newPerson);
+    await updateDoc(docRef, { id: docRef.id });
+    // Set the generated ID to the local person object
+    // setPeople(prev => prev.map(p => p.id === newPerson.id ? p : { ...p, id: docRef.id }));
+    // Or simply update your list after adding
+    // setPeople(prev => [...prev, { ...newPerson, id: docRef.id }]);
+  } catch (error) {
+    console.error("Error adding document: ", error);
+  }
+};
+
+  // Delete a person
+  const handleDeletePerson = async (personId) => {
+  if (!db) return;
+  // eslint-disable-next-line no-restricted-globals
+  if (confirm('Are you sure you want to remove this person?')) {
+    try {
+      await deleteDoc(doc(db, 'people', String(personId)));
+      setPeople(prev => prev.filter(p => p.id !== personId));
+    } catch (error) {
+      console.error("Error deleting document: ", error);
     }
-  };
+  }
+};
+
+
 
   return (
     <div className="w-full h-full bg-gradient-to-b from-blue-100 to-purple-100 p-6 overflow-auto">
@@ -246,7 +334,7 @@ const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, default
               <select 
                 value={worldBg}
                 onChange={(e) => setWorldBg(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg"
+                className="w-full px-3 py-2 border rounded-lg focus:ring focus:ring-purple-300"
               >
                 <option value="grassland">🌱 Grassland</option>
                 <option value="night">🌙 Night Sky</option>
@@ -278,7 +366,7 @@ const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, default
                 {people.map(person => (
                   <div key={person.id} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">{defaultAnimations[person.animation][0]}</span>
+                      <span className="text-2xl">{getDefaultEmoji(person.animation)}</span>
                       <div>
                         <p className="font-semibold">{person.nickname || person.name}</p>
                         <p className="text-xs text-gray-500">{person.timezone}</p>
@@ -323,40 +411,49 @@ const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, default
   );
 };
 
+
+// --- Main CalendarSync Component (CORE LOGIC) ---
 const CalendarSync = () => {
-  const [currentUser, setCurrentUser] = useState('mom');
+  const [auth, setAuth] = useState(null);
+  const [userId, setUserId] = useState(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  
+  const [currentUser, setCurrentUser] = useState('Mom');
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [view, setView] = useState('home');
-  const [people, setPeople] = useState([
-    {
-      id: 1,
-      name: 'Mom',
-      nickname: '',
-      timezone: 'Asia/Kolkata',
-      currentActivity: 'work',
-      customStatus: '',
-      animation: 'work',
-      customAnimations: {},
-      position: { x: 20, y: 30 }
-    },
-    {
-      id: 2,
-      name: 'Baby',
-      nickname: '',
-      timezone: 'America/New_York',
-      currentActivity: 'sleep',
-      customStatus: '',
-      animation: 'sleep',
-      customAnimations: {},
-      position: { x: 60, y: 50 }
-    }
-  ]);
+  const [people, setPeople] = useState([]); // INITIALIZED TO EMPTY ARRAY
   
   const [animFrame, setAnimFrame] = useState(0);
   const [worldBg, setWorldBg] = useState('grassland');
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
+  // --- 1. FIREBASE READY + AUTH ---
+useEffect(() => {
+  // No auth needed
+  setIsAuthReady(true);
+}, []);
+
+
+  useEffect(() => {
+  const q = collection(db, 'people'); // Top-level collection
+
+  console.log("📡 Listening to Firestore at:", 'people');
+
+  const unsub = onSnapshot(q, (snapshot) => {
+    console.log("📥 Firestore update received:", snapshot.size, "docs");
+
+    const arr = [];
+    snapshot.forEach((doc) => arr.push(doc.data()));
+    setPeople(arr);
+  });
+
+  return () => unsub();
+}, []);
+
+
+  
+  // --- Other Effects/Utilities ---
   // Animation loop
   useEffect(() => {
     const interval = setInterval(() => {
@@ -382,10 +479,11 @@ const CalendarSync = () => {
   };
 
   const renderChibi = (person) => {
-    const anim = person.customAnimations[person.animation] || defaultAnimations[person.animation] || defaultAnimations.unknown;
+    const anim = defaultAnimations[person.animation] || defaultAnimations.unknown;
+    const frame = Array.isArray(anim) ? anim[animFrame] : defaultAnimations.unknown[0];
     return (
       <div className="text-4xl animate-bounce" style={{ animationDuration: '1s' }}>
-        {anim[animFrame]}
+        {frame}
       </div>
     );
   };
@@ -427,7 +525,7 @@ const CalendarSync = () => {
         <div 
           className="absolute inset-0 transition-transform"
           style={{
-            transform: `scale($${scale}) translate($$ {pan.x}px, ${pan.y}px)`
+            transform: `scale(${scale}) translate(${pan.x}px, ${pan.y}px)`
           }}
         >
           {/* Decorative elements */}
@@ -448,7 +546,7 @@ const CalendarSync = () => {
         </div>
 
         {/* Top bar */}
-        <div className="absolute top-0 left-0 right-0 bg-white/90 p-3 shadow-md flex justify-between items-center">
+        <div className="absolute top-0 left-0 right-0 bg-white/90 p-3 shadow-md flex justify-between items-center z-10">
           <h1 className="text-xl font-bold text-purple-600">📅 Calendar Sync</h1>
           <div className="flex gap-2">
             <button 
@@ -466,7 +564,7 @@ const CalendarSync = () => {
   return (
     <div className="w-full h-screen overflow-hidden bg-gray-100">
       {view === 'home' && <HomeView />}
-      {view === 'profile' && (
+      {view === 'profile' && selectedPerson && (
         <ProfileView 
           selectedPerson={selectedPerson}
           setView={setView}
@@ -476,6 +574,7 @@ const CalendarSync = () => {
           renderChibi={renderChibi}
           getTimeForTimezone={getTimeForTimezone}
           getWeather={getWeather}
+          db={db} // Pass Firestore instance
         />
       )}
       {view === 'settings' && (
@@ -485,13 +584,13 @@ const CalendarSync = () => {
           setWorldBg={setWorldBg}
           people={people}
           setPeople={setPeople}
-          defaultAnimations={defaultAnimations}
+          db={db} // Pass Firestore instance
         />
       )}
 
       {/* Bottom navigation (mobile) */}
       {view === 'home' && (
-        <div className="absolute bottom-0 left-0 right-0 bg-white/95 p-3 shadow-lg md:hidden flex justify-around">
+        <div className="absolute bottom-0 left-0 right-0 bg-white/95 p-3 shadow-lg md:hidden flex justify-around z-10">
           {people.map(person => (
             <button
               key={person.id}
@@ -501,7 +600,7 @@ const CalendarSync = () => {
               }}
               className="flex flex-col items-center text-xs"
             >
-              <div className="text-2xl">{defaultAnimations[person.animation][0]}</div>
+              <div className="text-2xl">{getDefaultEmoji(person.animation)}</div>
               <span className="truncate w-16">{person.nickname || person.name}</span>
             </button>
           ))}
@@ -510,7 +609,7 @@ const CalendarSync = () => {
 
       {/* Sidebar navigation (desktop) */}
       {view === 'home' && (
-        <div className="hidden md:block absolute right-4 top-20 bg-white rounded-xl shadow-lg p-2 space-y-2">
+        <div className="hidden md:block absolute right-4 top-20 bg-white rounded-xl shadow-lg p-2 space-y-2 z-10">
           {people.map(person => (
             <button
               key={person.id}
@@ -520,7 +619,7 @@ const CalendarSync = () => {
               }}
               className="flex flex-col items-center p-2 hover:bg-purple-50 rounded-lg w-20"
             >
-              <div className="text-2xl">{defaultAnimations[person.animation][0]}</div>
+              <div className="text-2xl">{getDefaultEmoji(person.animation)}</div>
               <span className="text-xs truncate w-full text-center">
                 {person.nickname || person.name}
               </span>
