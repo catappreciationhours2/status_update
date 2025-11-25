@@ -276,28 +276,42 @@ const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, db }) =
   // Add a new person
   const handleAddPerson = async () => {
   if (!db) return;
-  try {
-    const newPerson = {
-      name: `New Friend ${people.length + 1}`,
-      nickname: '',
-      timezone: 'America/New_York',
-      currentActivity: 'unknown',
-      customStatus: '',
-      animation: 'unknown',
-      customAnimations: {},
-      position: { x: Math.random() * 60 + 20, y: Math.random() * 60 + 20 },
-    };
 
+  // Assign a temporary unique ID for React key
+  const tempId = 'temp-' + Date.now();
+
+  const newPerson = {
+    id: tempId,
+    name: `New Friend ${people.length + 1}`,
+    nickname: '',
+    timezone: 'America/New_York',
+    currentActivity: 'unknown',
+    customStatus: '',
+    animation: 'unknown',
+    customAnimations: {},
+    position: { x: Math.random() * 60 + 20, y: Math.random() * 60 + 20 },
+  };
+
+  // Optimistically update local state
+  setPeople(prev => [...prev, newPerson]);
+
+  try {
     const docRef = await addDoc(collection(db, 'people'), newPerson);
+
+    // Update Firestore ID in document
     await updateDoc(docRef, { id: docRef.id });
-    // Set the generated ID to the local person object
-    // setPeople(prev => prev.map(p => p.id === newPerson.id ? p : { ...p, id: docRef.id }));
-    // Or simply update your list after adding
-    // setPeople(prev => [...prev, { ...newPerson, id: docRef.id }]);
+
+    // Sync local state with Firestore ID
+    setPeople(prev =>
+      prev.map(p => (p.id === tempId ? { ...p, id: docRef.id } : p))
+    );
   } catch (error) {
     console.error("Error adding document: ", error);
+    // Optionally remove temp person if failed
+    setPeople(prev => prev.filter(p => p.id !== tempId));
   }
 };
+
 
   // Delete a person
   const handleDeletePerson = async (personId) => {
@@ -414,7 +428,6 @@ const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, db }) =
 
 // --- Main CalendarSync Component (CORE LOGIC) ---
 const CalendarSync = () => {
-  const [auth, setAuth] = useState(null);
   const [userId, setUserId] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   
@@ -430,9 +443,18 @@ const CalendarSync = () => {
 
   // --- 1. FIREBASE READY + AUTH ---
 useEffect(() => {
-  // No auth needed
-  setIsAuthReady(true);
+  signInAnonymously(auth)
+    .then((userCredential) => {
+      console.log("✅ Signed in anonymously:", userCredential.user.uid);
+      setUserId(userCredential.user.uid);
+      setIsAuthReady(true);
+    })
+    .catch((err) => {
+      console.error("❌ Anonymous sign-in failed:", err);
+      setIsAuthReady(false);
+    });
 }, []);
+
 
 
   useEffect(() => {
@@ -449,7 +471,7 @@ useEffect(() => {
   });
 
   return () => unsub();
-}, []);
+}, [isAuthReady]);
 
 
   
@@ -501,7 +523,7 @@ useEffect(() => {
     >
       <div className="flex flex-col items-center bg-white/80 rounded-lg p-2 shadow-lg backdrop-blur-sm">
         {renderChibi(person)}
-        <div className="text-xs font-bold mt-1 text-center">
+        <div key={person.id} className="text-xs font-bold mt-1 text-center">
           {person.nickname || person.name}
         </div>
         {isHome && (
