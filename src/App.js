@@ -450,28 +450,6 @@ const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, db }) =
                 ))}
               </div>
             </div>
-
-            <div className="border-t pt-4">
-              <h3 className="font-bold mb-2">Custom Animations</h3>
-              <p className="text-sm text-gray-600 mb-3">
-                Upload a sequence of images (PNG/GIF) that will cycle every 500ms
-              </p>
-              <button className="w-full border-2 border-dashed border-gray-300 py-8 rounded-lg hover:border-purple-400 hover:bg-purple-50">
-                <Upload className="mx-auto mb-2" size={32} />
-                <p className="text-sm">Click to upload animation frames</p>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h3 className="font-bold text-lg mb-3">📱 Deployment Info</h3>
-          <div className="text-sm space-y-2 text-gray-700">
-            <p>✅ GitHub Pages compatible</p>
-            <p>✅ Phone-friendly responsive design</p>
-            <p>✅ Touch gestures (zoom/pan on mobile)</p>
-            <p>⚠️ Google Calendar API requires HTTPS</p>
-            <p>💾 No data stored - everything client-side</p>
           </div>
         </div>
       </div>
