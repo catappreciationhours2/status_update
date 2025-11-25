@@ -29,6 +29,24 @@ const getDefaultEmoji = (animation) => {
   return (defaultAnimations[animation] || defaultAnimations.unknown)[0];
 };
 
+const getSidebarIcon = (person) => {
+    const { animation, customAnimations } = person;
+
+    // If this animation exists in customAnimations and has at least one frame
+    if (customAnimations?.[animation]?.length > 0) {
+      return (
+        <img
+          src={customAnimations[animation][0]}
+          alt={animation}
+          className="w-8 h-8 object-contain"
+        />
+      );
+    }
+
+    // Otherwise fallback to default emoji
+    return <span className="text-2xl">{getDefaultEmoji(animation)}</span>;
+  };
+
 // --- ProfileView Component (Extracted) ---
 const ProfileView = ({ 
   selectedPerson, 
@@ -67,7 +85,11 @@ const handleSave = async () => {
   if (!editedPerson || !db) return;
   try {
     const docRef = doc(db, 'people', String(editedPerson.id));
-    await setDoc(docRef, editedPerson, { merge: true });
+    await setDoc(docRef, {
+      ...editedPerson,
+      customAnimations: editedPerson.customAnimations || {},
+      animation: editedPerson.animation
+    }, { merge: true });
     // Update local state
     setPeople(prev => prev.map(p => p.id === editedPerson.id ? editedPerson : p));
     setSelectedPerson(editedPerson);
@@ -76,7 +98,6 @@ const handleSave = async () => {
     console.error("Error updating document: ", error);
   }
 };
-
 
   const handleCancel = () => {
     setEditedPerson(null);
@@ -88,13 +109,32 @@ const handleSave = async () => {
   };
   
   const handleAnimationUpload = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      handleFieldChange('customStatus', `[ANIMATION] Ready to use ${file.name}`);
-      handleFieldChange('animation', 'walk');
-      event.target.value = null; 
-    }
+    const files = Array.from(event.target.files);
+    if (files.length === 0) return;
+
+    const newCustomAnimations = { ...editedPerson.customAnimations };
+    let presetIndex = Object.keys(newCustomAnimations).length + 1; // preset1, preset2, etc.
+
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const url = e.target.result; // base64 data URL
+        const presetName = `preset${presetIndex++}`;
+        newCustomAnimations[presetName] = [...(newCustomAnimations[presetName] || []), url];
+
+        handleFieldChange('customAnimations', newCustomAnimations);
+
+        handleFieldChange('animation', presetName);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    event.target.value = null;
   };
+
+  
+
+
 
   const displayPerson = isEditMode ? editedPerson : person;
   // NOTE: Assuming 'Mom' is the current user for editing purposes
@@ -229,10 +269,24 @@ const handleSave = async () => {
                 onChange={(e) => handleFieldChange('animation', e.target.value)}
                 className="w-full px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500"
               >
-                <option value="sleep">💤 Sleep</option>
-                <option value="work">💼 Work</option>
-                <option value="walk">🚶 Walk</option>
-                <option value="unknown">❓ Other</option>
+                {/* Default animations */}
+                {['sleep', 'work', 'walk', 'unknown'].map(key => (
+                  <option key={key} value={key}>
+                    {key === 'sleep' ? '💤 Sleep' :
+                    key === 'work' ? '💼 Work' :
+                    key === 'walk' ? '🚶 Walk' :
+                    '❓ Other'}
+                  </option>
+                ))}
+
+                {/* Custom uploads for this profile */}
+                {editedPerson.customAnimations &&
+                  Object.keys(editedPerson.customAnimations).map(preset => (
+                    <option key={preset} value={preset}>
+                      {preset}
+                    </option>
+                  ))
+                }
               </select>
             </div>
 
@@ -253,7 +307,7 @@ const handleSave = async () => {
                 type="file"
                 ref={fileInputRef}
                 style={{ display: 'none' }}
-                // NOTE: No handler needed here, as we only simulate upload
+                onChange={handleAnimationUpload}
                 accept=".png, .gif" 
             />
             <button 
@@ -380,7 +434,7 @@ const SettingsView = ({ setView, worldBg, setWorldBg, people, setPeople, db }) =
                 {people.map(person => (
                   <div key={person.id} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">{getDefaultEmoji(person.animation)}</span>
+                      {getSidebarIcon(person)}
                       <div>
                         <p className="font-semibold">{person.nickname || person.name}</p>
                         <p className="text-xs text-gray-500">{person.timezone}</p>
@@ -501,14 +555,38 @@ useEffect(() => {
   };
 
   const renderChibi = (person) => {
-    const anim = defaultAnimations[person.animation] || defaultAnimations.unknown;
-    const frame = Array.isArray(anim) ? anim[animFrame] : defaultAnimations.unknown[0];
+    const { animation, customAnimations } = person;
+
+    let frames = [];
+    if (customAnimations && customAnimations[animation]) {
+      frames = customAnimations[animation]; // uploaded frames
+    } else {
+      frames = defaultAnimations[animation] || defaultAnimations.unknown; // emoji fallback
+    }
+
+    const frame = Array.isArray(frames) ? frames[animFrame % frames.length] : frames;
+
+    // If frame is a URL (uploaded image), render <img> and animate it
+    if (typeof frame === 'string' && (frame.startsWith('data:') || frame.startsWith('http'))) {
+      return (
+        <img
+          src={frame}
+          alt="animation frame"
+          className="w-12 h-12 animate-bounce object-contain"
+          style={{ animationDuration: '1s' }}
+        />
+      );
+    }
+
+    // Otherwise fallback to emoji/text
     return (
       <div className="text-4xl animate-bounce" style={{ animationDuration: '1s' }}>
         {frame}
       </div>
     );
   };
+
+
 
   const PersonCard = ({ person, onClick, isHome }) => (
     <div
@@ -622,7 +700,7 @@ useEffect(() => {
               }}
               className="flex flex-col items-center text-xs"
             >
-              <div className="text-2xl">{getDefaultEmoji(person.animation)}</div>
+              <div>{getSidebarIcon(person)}</div>
               <span className="truncate w-16">{person.nickname || person.name}</span>
             </button>
           ))}
@@ -641,7 +719,7 @@ useEffect(() => {
               }}
               className="flex flex-col items-center p-2 hover:bg-purple-50 rounded-lg w-20"
             >
-              <div className="text-2xl">{getDefaultEmoji(person.animation)}</div>
+              <div>{getSidebarIcon(person)}</div>
               <span className="text-xs truncate w-full text-center">
                 {person.nickname || person.name}
               </span>
